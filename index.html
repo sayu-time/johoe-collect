@@ -100,6 +100,11 @@ button,input,textarea,select{font:inherit;color:inherit}
 .d-meta{font-size:12.5px;color:var(--ink-muted);margin:0;padding-bottom:12px;border-bottom:2px solid var(--ink)}
 .d-dept{margin-top:20px}
 .d-dept h2{font-family:var(--f-display);font-size:18px;margin:0 0 8px;display:flex;gap:10px;align-items:baseline}
+.d-dept h2 .dt{font-family:var(--f-body);font-size:12px;font-weight:500;color:var(--ink-muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.pick{display:flex;gap:8px;align-items:flex-start;cursor:pointer;min-width:0;flex:1}
+.pick input{margin-top:4px;flex-shrink:0}
+.pick .nm,.pick .mt{display:block}
 .d-dept h2 .n{font-family:var(--f-body);font-size:12px;color:var(--ink-accent);font-weight:700;font-variant-numeric:tabular-nums}
 .paper .tag.n{border:1px solid var(--rule);color:var(--ink-muted);background:transparent}
 .paper .tag.d{background:var(--ink-accent);color:#fff}
@@ -180,7 +185,7 @@ button,input,textarea,select{font:inherit;color:inherit}
       <button class="btn primary" id="submit" type="button" disabled>제출</button>
     </div>
     <div id="result"></div>
-    <p class="note">같은 부서 이름으로 다시 제출하면 이전 제출이 새 내용으로 바뀝니다. 작성 중인 내용은 이 브라우저에 자동 저장됩니다.</p>
+    <p class="note">같은 날 같은 부서 이름으로 다시 제출하면 그날 제출분이 새 내용으로 바뀝니다. 다른 날 제출은 따로 보관됩니다. 작성 중인 내용은 이 브라우저에 자동 저장됩니다.</p>
   </section>
 
   <!-- 서기 -->
@@ -195,7 +200,7 @@ button,input,textarea,select{font:inherit;color:inherit}
       <div class="card">
         <h2><span>제출 현황</span><span id="subCount" class="note" style="margin:0"></span></h2>
         <div id="subList"><p class="note">불러오는 중…</p></div>
-        <p class="note">순서는 문서에 나오는 부서 순서입니다.</p>
+        <p class="note">체크한 제출만 오른쪽 문서에 들어갑니다. 날짜 버튼은 그날 제출만 선택합니다. 순서는 문서에 나오는 순서입니다.</p>
       </div>
       <div class="card">
         <h2><span>문서</span></h2>
@@ -434,7 +439,7 @@ async function checkExisting(){
     const d = await call('exists', name);
     if(seq !== existSeq || !d) return;
     box.hidden = false;
-    box.innerHTML = `<span>이미 제출한 부서입니다 (${esc(fmtTime(d.submittedAt))}). 그대로 제출하면 이전 내용이 바뀝니다.</span><button class="btn sm" type="button" id="loadPrev">이전 제출 불러오기</button>`;
+    box.innerHTML = `<span>오늘 이미 제출했습니다 (${esc(fmtTime(d.submittedAt))}). 그대로 제출하면 오늘 제출분이 새 내용으로 바뀝니다.</span><button class="btn sm" type="button" id="loadPrev">이전 제출 불러오기</button>`;
     $('#loadPrev').onclick = () => { items = JSON.parse(JSON.stringify(d.items || [])); box.hidden = true; renderItems(); };
   }catch(e){}
 }
@@ -463,8 +468,11 @@ let subs = [], settings = {}, loaded = {subs:false, set:false};
 function orderedSubs(){
   const order = Array.isArray(settings.order) ? settings.order : [];
   const rank = id => { const k = order.indexOf(id); return k < 0 ? 1e9 : k; };
-  return subs.slice().sort((a, b) => rank(a.id) - rank(b.id) || (a.submittedAt || 0) - (b.submittedAt || 0));
+  return subs.slice().sort((a, b) => rank(a.id) - rank(b.id) || (a.day || '').localeCompare(b.day || '') || (a.submittedAt || 0) - (b.submittedAt || 0));
 }
+function fmtDay(d){ if(!d) return ''; const [y,m,dd] = d.split('-').map(Number); return `${m}/${dd}(${DOW[new Date(y,m-1,dd).getDay()]})`; }
+const excludedSet = () => new Set(Array.isArray(settings.excluded) ? settings.excluded : []);
+function selectedSubs(){ const ex = excludedSet(); return orderedSubs().filter(s => !ex.has(s.id)); }
 
 function countKinds(list){
   const c = {notice:0, discuss:0, question:0, suggest:0};
@@ -475,11 +483,11 @@ function countKinds(list){
 function renderDoc(list, dateTxt){
   const c = countKinds(list);
   let h = `<p class="d-eyebrow">임원 조회 · 전달 및 논의</p><h1 class="d-title">${esc(dateTxt || '조회')} 조회</h1>
-  <p class="d-meta">부서 ${list.length} · 공지 ${c.notice} · 논의 ${c.discuss} · 질문 ${c.question} · 건의 ${c.suggest} &nbsp;|&nbsp; 10분 묵독 후 시작 · 공지는 질문만 확인 · 논의 중 노트북 사용 금지</p>`;
+  <p class="d-meta">제출 ${list.length}건 · 공지 ${c.notice} · 논의 ${c.discuss} · 질문 ${c.question} · 건의 ${c.suggest} &nbsp;|&nbsp; 10분 묵독 후 시작 · 공지는 질문만 확인 · 논의 중 노트북 사용 금지</p>`;
   if(!list.length) h += `<p class="empty">아직 제출된 부서가 없습니다. 제출이 들어오면 여기에 문서가 만들어집니다.</p>`;
   list.forEach((s, di) => {
     const its = s.items || [];
-    h += `<section class="d-dept"><h2><span class="n">${String(di+1).padStart(2,'0')}</span>${esc(s.dept)}</h2>`;
+    h += `<section class="d-dept"><h2><span class="n">${String(di+1).padStart(2,'0')}</span>${esc(s.dept)}${s.day ? `<span class="dt">${esc(fmtDay(s.day))}</span>` : ''}</h2>`;
     const ns = its.filter(i => i.kind === 'notice');
     if(ns.length) h += `<ul class="notices">` + ns.map(it => `<li><div class="t"><span class="tag n">공지</span>${esc(it.title)}</div>${has(it.body) ? `<div class="b">${nl(it.body)}</div>` : ''}</li>`).join('') + `</ul>`;
     its.filter(i => i.kind === 'discuss').forEach(it => {
@@ -508,7 +516,7 @@ function renderDoc(list, dateTxt){
 function plainDoc(list, dateTxt){
   const L = [`${dateTxt} 임원 조회 · 전달 및 논의`, ''];
   list.forEach((s, i) => {
-    L.push(`${i+1}. ${s.dept}`);
+    L.push(`${i+1}. ${s.dept}${s.day ? ` (${fmtDay(s.day)})` : ''}`);
     (s.items || []).forEach(it => {
       if(it.kind === 'notice'){ L.push(`[공지] ${it.title}`); if(has(it.body)) L.push(it.body.replace(/\n/g, ' ')); }
       else if(it.kind === 'discuss'){
@@ -535,7 +543,7 @@ function renderMinutes(list, dateTxt){
   let no = 0;
   h += `<table class="mins"><thead><tr><th>번호</th><th class="ct">안건 · 내용</th><th class="rs">논의 결과 · 결정</th><th class="ow">담당 · 기한</th></tr></thead><tbody>`;
   list.forEach(s => {
-    h += `<tr class="dp"><td colspan="4">${esc(s.dept)}</td></tr>`;
+    h += `<tr class="dp"><td colspan="4">${esc(s.dept)}${s.day ? ` · ${esc(fmtDay(s.day))}` : ''}</td></tr>`;
     (s.items || []).forEach(it => {
       no++;
       let ct = '', rs = '';
@@ -564,7 +572,7 @@ function plainMinutes(list, dateTxt){
   const L = [`임원 조회 회의록`, `일시: ${dateTxt}`, `장소:`, `참석:`, `서기:`, ''];
   let no = 0;
   list.forEach(s => {
-    L.push(`■ ${s.dept}`);
+    L.push(`■ ${s.dept}${s.day ? ` (${fmtDay(s.day)})` : ''}`);
     (s.items || []).forEach(it => {
       no++;
       const one = t => String(t || '').replace(/\n/g, ' ');
@@ -584,7 +592,7 @@ function plainMinutes(list, dateTxt){
 }
 
 let view = 'read';
-const curPlain = () => (view === 'min' ? plainMinutes : plainDoc)(orderedSubs(), fmtDate(settings.date || tomorrow()));
+const curPlain = () => (view === 'min' ? plainMinutes : plainDoc)(selectedSubs(), fmtDate(settings.date || tomorrow()));
 function setView(v){
   view = v; store.set('jh-view', v);
   $('#vwRead').setAttribute('aria-selected', String(v === 'read')); $('#vwMin').setAttribute('aria-selected', String(v === 'min'));
@@ -594,20 +602,25 @@ document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click'
 
 let pendingDel = null;
 function renderClerk(){
-  const list = orderedSubs();
+  const all = orderedSubs(), ex = excludedSet(), list = all.filter(s => !ex.has(s.id));
   const date = settings.date || tomorrow();
   if(document.activeElement !== $('#date')) $('#date').value = date;
-  $('#subCount').textContent = list.length ? `${list.length}개 부서` : '';
+  $('#subCount').textContent = all.length ? `${list.length}/${all.length}건 선택` : '';
   const box = $('#subList');
   if(!loaded.subs) box.innerHTML = '<p class="note">불러오는 중…</p>';
-  else if(!list.length) box.innerHTML = '<p class="note">아직 제출한 부서가 없습니다. 작성 탭 링크를 부서 담당자에게 보내세요.</p>';
-  else box.innerHTML = list.map((s, k) => {
+  else if(!all.length) box.innerHTML = '<p class="note">아직 제출한 부서가 없습니다. 작성 탭 링크를 부서 담당자에게 보내세요.</p>';
+  else{
+    const days = Array.from(new Set(all.map(s => s.day).filter(Boolean))).sort().reverse();
+    box.innerHTML = `<div class="chips"><button class="btn sm" type="button" data-sel="all">전체 선택</button><button class="btn sm" type="button" data-sel="none">전체 해제</button>`
+      + days.map(d => `<button class="btn sm" type="button" data-sel="day:${d}">${esc(fmtDay(d))} ${all.filter(s => s.day === d).length}건만</button>`).join('') + `</div>`
+      + all.map((s, k) => {
     const n = (s.items || []).length;
-    return `<div class="sub"><div><div class="nm">${esc(s.dept)}</div><div class="mt">안건 ${n}건 · ${esc(fmtTime(s.submittedAt))}</div></div>
+    return `<div class="sub"><label class="pick"><input type="checkbox" data-pick="${esc(s.id)}" aria-label="${esc(s.dept)} 문서에 포함"${ex.has(s.id) ? '' : ' checked'}><span><span class="nm">${esc(s.dept)}</span><span class="mt">${esc(fmtDay(s.day))} · 안건 ${n}건 · ${esc(fmtTime(s.submittedAt))}</span></span></label>
       <div class="ctl"><button class="btn sm" type="button" aria-label="위로" data-mv="${k}" data-d="-1"${k === 0 ? ' disabled' : ''}>↑</button>
-      <button class="btn sm" type="button" aria-label="아래로" data-mv="${k}" data-d="1"${k === list.length-1 ? ' disabled' : ''}>↓</button>
+      <button class="btn sm" type="button" aria-label="아래로" data-mv="${k}" data-d="1"${k === all.length-1 ? ' disabled' : ''}>↓</button>
       <button class="btn sm" type="button" data-del="${esc(s.id)}">${pendingDel === s.id ? '정말 삭제' : '삭제'}</button></div></div>`;
   }).join('');
+  }
   $('#doc').innerHTML = (view === 'min' ? renderMinutes : renderDoc)(list, fmtDate(date));
 }
 
@@ -620,6 +633,12 @@ function saveSettings(patch){
 
 $('#subList').addEventListener('click', e => {
   if(!db) return;
+  const sel = e.target.closest('[data-sel]');
+  if(sel){
+    const all = orderedSubs(), w = sel.dataset.sel;
+    const keep = w === 'all' ? () => true : w === 'none' ? () => false : s => s.day === w.slice(4);
+    saveSettings({excluded: all.filter(s => !keep(s)).map(s => s.id)}); renderClerk(); return;
+  }
   const mv = e.target.closest('[data-mv]'), del = e.target.closest('[data-del]');
   if(mv){
     const ids = orderedSubs().map(s => s.id), k = +mv.dataset.mv, j = k + +mv.dataset.d;
@@ -632,6 +651,11 @@ $('#subList').addEventListener('click', e => {
     pendingDel = null;
     call('clerkDelete', pin, id).then(() => pollClerk()).catch(() => {});
   }
+});
+$('#subList').addEventListener('change', e => {
+  const p = e.target.closest('[data-pick]'); if(!p || !db) return;
+  const ex = excludedSet(); if(p.checked) ex.delete(p.dataset.pick); else ex.add(p.dataset.pick);
+  saveSettings({excluded: Array.from(ex)}); renderClerk();
 });
 $('#date').addEventListener('change', e => { if(db && e.target.value){ saveSettings({date: e.target.value}); renderClerk(); } });
 
